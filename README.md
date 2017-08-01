@@ -13,5 +13,7 @@ If you're not familiar with Docker and Blockchain, can have a look at these book
 
 See [Fabric v0.6](0.6/).
 
+Note: Blockchain Explorer (BE) is only working against 0.6, not for 1.0
+
 ## Hyperledger Fabric v1.0
 See [Fabric v1.0](1.0/).
