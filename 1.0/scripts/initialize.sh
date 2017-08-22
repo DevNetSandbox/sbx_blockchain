@@ -1,109 +1,220 @@
-# This compose file will start a Hyperledger Fabric 1.0 MVE, including
-# * 1 ca
-# * 1 orderer
-# * 4 peers in 2 orgs
-# * cli for testing
-# assigned fixed ip addreess to all containers
+#!/bin/bash
 
-version: '2.0'
+# Detecting whether can import the header file to render colorful cli output
+if [ -f ./header.sh ]; then
+ source ./header.sh
+elif [ -f scripts/header.sh ]; then
+ source scripts/header.sh
+else
+ alias echo_r="echo"
+ alias echo_g="echo"
+ alias echo_b="echo"
+fi
 
-services:
-  ca:
-    image: hyperledger/fabric-ca
-    container_name: fabric-ca
-    hostname: ca
-  #  command: /go/src/github.com/hyperledger/fabric-ca/bin/ca server start -ca testdata/ec.pem -ca-key testdata/ec-key.pem -config testdata/testconfig.json
-    ports:
-      - "7054:7054"
-    networks:
-      default:
-        ipv4_address: 172.18.0.2
-    command: fabric-ca-server start -b admin:adminpw
-    
-  orderer.example.com:  # There  can be multiple orderers
-    extends:
-      file: docker-compose-base.yaml
-      service: orderer.example.com
-    networks:
-      default:
-        ipv4_address: 172.18.0.3
+echo
+echo " ============================================== "
+echo " ==========initialize businesschannel========== "
+echo " ============================================== "
+echo
 
-  peer0.org1.example.com:
-    extends:
-      file: docker-compose-base.yaml
-      service: peer0.org1.example.com
-    networks:
-      default:
-        ipv4_address: 172.18.0.4
+CHANNEL_NAME="$1"
+: ${CHANNEL_NAME:="businesschannel"}
+: ${TIMEOUT:="60"}
+COUNTER=1
+MAX_RETRY=5
+ORDERER_CA=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem
 
-  peer1.org1.example.com:
-    extends:
-      file: docker-compose-base.yaml
-      service: peer1.org1.example.com
-    networks:
-       default:
-        ipv4_address: 172.18.0.5
+echo_b "Channel name : "$CHANNEL_NAME
 
-  peer0.org2.example.com:
-    extends:
-      file: docker-compose-base.yaml
-      service: peer0.org2.example.com
-    networks:
-      default:
-        ipv4_address: 172.18.0.6
+verifyResult () {
+	if [ $1 -ne 0 ] ; then
+		echo_b "!!!!!!!!!!!!!!! "$2" !!!!!!!!!!!!!!!!"
+                echo_r "================== ERROR !!! FAILED to execute End-2-End Scenario =================="
+		echo
+   		exit 1
+	fi
+}
 
-  peer1.org2.example.com:
-    extends:
-      file: docker-compose-base.yaml
-      service: peer1.org2.example.com
-    networks:
-      default:
-        ipv4_address: 172.18.0.7
+setGlobals () {
 
-  cli:
-    container_name: fabric-cli
-    hostname: fabric-cli
-    image: hyperledger/fabric-tools
-    tty: true
-    environment:
-      #- GOPATH=/opt/gopath
-      - CORE_PEER_ID=fabric-cli
-      - CORE_LOGGING_LEVEL=DEBUG
-      - CORE_PEER_ADDRESS=peer0.org1.example.com:7051 # default to operate on peer0.org1
-      - CORE_PEER_LOCALMSPID=Org1MSP
-      - CORE_PEER_TLS_ENABLED=true  # to enable TLS, change to true
-      - CORE_PEER_TLS_CERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/server.crt
-      - CORE_PEER_TLS_KEY_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/server.key
-      - CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
-      - CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
-    volumes:
-        - ./e2e_cli/examples:/opt/gopath/src/github.com/hyperledger/fabric/examples
-        - ./e2e_cli/crypto-config:/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/
-        - ./scripts:/opt/gopath/src/github.com/hyperledger/fabric/peer/scripts/
-        - ./e2e_cli/channel-artifacts:/opt/gopath/src/github.com/hyperledger/fabric/peer/channel-artifacts
-        - ./e2e_cli/configtx.yaml:/etc/hyperledger/fabric/configtx.yaml
-        - ./e2e_cli/crypto-config.yaml:/etc/hyperledger/fabric/crypto-config.yaml
-    depends_on:
-      - orderer.example.com
-      - peer0.org1.example.com
-      - peer1.org1.example.com
-      - peer0.org2.example.com
-      - peer1.org2.example.com
-    links:
-      - orderer.example.com
-      - peer0.org1.example.com
-      - peer1.org1.example.com
-      - peer0.org2.example.com
-      - peer1.org2.example.com
-    working_dir: /opt/gopath/src/github.com/hyperledger/fabric/peer
-    command: bash -c 'while true; do sleep 20170504; done'
-    networks:
-      default:
-        ipv4_address: 172.18.0.8
+	if [ $1 -eq 0 -o $1 -eq 1 ] ; then
+		CORE_PEER_LOCALMSPID="Org1MSP"
+		CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
+		CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
+		if [ $1 -eq 0 ]; then
+			CORE_PEER_ADDRESS=peer0.org1.example.com:7051
+		else
+			CORE_PEER_ADDRESS=peer1.org1.example.com:7051
+		fi
+	else
+		CORE_PEER_LOCALMSPID="Org2MSP"
+		CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt
+		CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org2.example.com/users/Admin@org2.example.com/msp
+		if [ $1 -eq 2 ]; then
+			CORE_PEER_ADDRESS=peer0.org2.example.com:7051
+		else
+			CORE_PEER_ADDRESS=peer1.org2.example.com:7051
+		fi
+	fi
 
-networks:
-  default:
-    driver: bridge
-    ipam:
-      config:
-      - subnet: 172.18.0.0/24
+	env |grep CORE
+}
+
+checkOSNAvailability() {
+	#Use orderer's MSP for fetching system channel config block
+	CORE_PEER_LOCALMSPID="OrdererMSP"
+	CORE_PEER_TLS_ROOTCERT_FILE=$ORDERER_CA
+	CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/example.com/orderers/orderer.example.com/msp
+
+	local rc=1
+	local starttime=$(date +%s)
+
+	# continue to poll
+	# we either get a successful response, or reach TIMEOUT
+	while test "$(($(date +%s)-starttime))" -lt "$TIMEOUT" -a $rc -ne 0
+	do
+		 sleep 3
+		 echo "Attempting to fetch system channel 'testchainid' ...$(($(date +%s)-starttime)) secs"
+		 if [ -z "$CORE_PEER_TLS_ENABLED" -o "$CORE_PEER_TLS_ENABLED" = "false" ]; then
+			 peer channel fetch 0 -o orderer.example.com:7050 -c "testchainid" >&log.txt
+		 else
+			 peer channel fetch 0 -o orderer.example.com:7050 -c "testchainid" --tls $CORE_PEER_TLS_ENABLED --cafile $ORDERER_CA >&log.txt
+		 fi
+		 test $? -eq 0 && VALUE=$(cat log.txt | awk '/Received block/ {print $NF}')
+		 test "$VALUE" = "0" && let rc=0
+	done
+	cat log.txt
+	verifyResult $rc "Ordering Service is not available, Please try again ..."
+	echo "===================== Ordering Service is up and running ===================== "
+	echo
+}
+
+createChannel() {
+	setGlobals 0
+	if [ -z "$CORE_PEER_TLS_ENABLED" -o "$CORE_PEER_TLS_ENABLED" = "false" ]; then
+		peer channel create -o orderer.example.com:7050 -c $CHANNEL_NAME -f ./channel-artifacts/channel.tx --timeout $TIMEOUT >&log.txt
+	else
+		peer channel create -o orderer.example.com:7050 -c $CHANNEL_NAME -f ./channel-artifacts/channel.tx --tls $CORE_PEER_TLS_ENABLED --cafile $ORDERER_CA --timeout $TIMEOUT >&log.txt
+	fi
+	res=$?
+	cat log.txt
+	verifyResult $res "Channel creation failed"
+	echo_g "===================== Channel \"$CHANNEL_NAME\" is created successfully ===================== "
+	echo
+}
+
+updateAnchorPeers() {
+        PEER=$1
+        setGlobals $PEER
+
+        if [ -z "$CORE_PEER_TLS_ENABLED" -o "$CORE_PEER_TLS_ENABLED" = "false" ]; then
+		peer channel update -o orderer.example.com:7050 -c $CHANNEL_NAME -f ./channel-artifacts/${CORE_PEER_LOCALMSPID}anchors.tx >&log.txt
+	else
+		peer channel update -o orderer.example.com:7050 -c $CHANNEL_NAME -f ./channel-artifacts/${CORE_PEER_LOCALMSPID}anchors.tx --tls $CORE_PEER_TLS_ENABLED --cafile $ORDERER_CA >&log.txt
+	fi
+	res=$?
+	cat log.txt
+	verifyResult $res "Anchor peer update failed"
+	echo "===================== Anchor peers for org \"$CORE_PEER_LOCALMSPID\" on \"$CHANNEL_NAME\" is updated successfully ===================== "
+	sleep 5
+	echo
+}
+
+## Sometimes Join takes time hence RETRY atleast for 5 times
+joinWithRetry () {
+	peer channel join -b $CHANNEL_NAME.block  >&log.txt
+	res=$?
+	cat log.txt
+	if [ $res -ne 0 -a $COUNTER -lt $MAX_RETRY ]; then
+		COUNTER=` expr $COUNTER + 1`
+		echo_b "PEER$1 failed to join the channel, Retry after 2 seconds"
+		sleep 2
+		joinWithRetry $1
+	else
+		COUNTER=1
+	fi
+        verifyResult $res "After $MAX_RETRY attempts, PEER$ch has failed to Join the Channel"
+}
+
+joinChannel () {
+	for ch in 0 1 2 3; do
+		setGlobals $ch
+		joinWithRetry $ch
+		echo_g "===================== PEER$ch joined on the channel \"$CHANNEL_NAME\" ===================== "
+		sleep 2
+		echo
+	done
+}
+
+installChaincode () {
+	PEER=$1
+	setGlobals $PEER
+	peer chaincode install -n mycc -v 1.0 -p github.com/hyperledger/fabric/examples/chaincode/go/chaincode_example02 >&log.txt
+	res=$?
+	cat log.txt
+        verifyResult $res "Chaincode installation on remote peer PEER$PEER has Failed"
+	echo_g "===================== Chaincode is installed on remote peer PEER$PEER ===================== "
+	echo
+}
+
+instantiateChaincode () {
+	PEER=$1
+	setGlobals $PEER
+	# while 'peer chaincode' command can get the orderer endpoint from the peer (if join was successful),
+	# lets supply it directly as we know it using the "-o" option
+	if [ -z "$CORE_PEER_TLS_ENABLED" -o "$CORE_PEER_TLS_ENABLED" = "false" ]; then
+		peer chaincode instantiate -o orderer.example.com:7050 -C $CHANNEL_NAME -n mycc -v 1.0 -c '{"Args":["init","a","100","b","200"]}' -P "OR	('Org1MSP.member','Org2MSP.member')" >&log.txt
+	else
+		peer chaincode instantiate -o orderer.example.com:7050 --tls $CORE_PEER_TLS_ENABLED --cafile $ORDERER_CA -C $CHANNEL_NAME -n mycc -v 1.0 -c '{"Args":["init","a","100","b","200"]}' -P "OR	('Org1MSP.member','Org2MSP.member')" >&log.txt
+	fi
+	res=$?
+	cat log.txt
+	verifyResult $res "Chaincode instantiation on PEER$PEER on channel '$CHANNEL_NAME' failed"
+	echo_g "===================== Chaincode Instantiation on PEER$PEER on channel '$CHANNEL_NAME' is successful ===================== "
+	echo
+}
+
+
+## Create channel
+echo_b "Creating channel..."
+createChannel
+
+## Join all the peers to the channel
+echo_b "Having all peers join the channel..."
+joinChannel
+
+## Set the anchor peers for each org in the channel
+echo_b "Updating anchor peers for org1..."
+updateAnchorPeers 0
+echo_b "Updating anchor peers for org2..."
+updateAnchorPeers 2
+
+## Install chaincode on all peers
+echo_b "Installing chaincode on all 4 peers..."
+installChaincode 0
+installChaincode 1
+installChaincode 2
+installChaincode 3
+
+# Instantiate chaincode on all peers
+# Instantiate can only be executed once on any node
+echo_b "Instantiating chaincode on all 4 peers..."
+instantiateChaincode 0
+instantiateChaincode 1
+#instantiateChaincode 2
+#instantiateChaincode 3
+
+
+echo
+echo_g "===================== All GOOD, initialization completed ===================== "
+echo
+
+echo
+echo " _____   _   _   ____  "
+echo "| ____| | \ | | |  _ \ "
+echo "|  _|   |  \| | | | | |"
+echo "| |___  | |\  | | |_| |"
+echo "|_____| |_| \_| |____/ "
+echo
+
+exit 0
